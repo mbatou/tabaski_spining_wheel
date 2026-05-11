@@ -36,8 +36,20 @@ function initialStock(): Record<Exclude<PrizeKey, "lose">, number> {
 }
 
 function initialSites(): Record<SiteSlug, { winsEnabled: boolean; coords: SiteCoords | null }> {
+  const seededAt = Date.now();
+  // Seeded coordinates for sites known at build time. Supervisors can override
+  // any of these from /supervisor (the in-process store accepts updates; chunk
+  // 2 will persist them through Upstash Redis so panel edits survive restarts).
+  const seeds: Partial<Record<SiteSlug, SiteCoords>> = {
+    "market-1": {
+      lat: 14.7565966,
+      lng: -17.429081,
+      radiusM: DEFAULT_SITE_RADIUS_M,
+      updatedAt: seededAt,
+    },
+  };
   return Object.fromEntries(
-    SITES.map((s) => [s.slug, { winsEnabled: true, coords: null }]),
+    SITES.map((s) => [s.slug, { winsEnabled: true, coords: seeds[s.slug] ?? null }]),
   ) as Record<SiteSlug, { winsEnabled: boolean; coords: SiteCoords | null }>;
 }
 
