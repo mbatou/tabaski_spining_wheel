@@ -1,0 +1,20 @@
+export type SiteSlug = "market-1" | "market-2" | "market-3" | "market-4" | "roaming-truck" | "unassigned";
+
+export const SITES: { slug: SiteSlug; label: string; short: string }[] = [
+  { slug: "market-1",      label: "Marché 1",            short: "M1" },
+  { slug: "market-2",      label: "Marché 2",            short: "M2" },
+  { slug: "market-3",      label: "Marché 3",            short: "M3" },
+  { slug: "market-4",      label: "Marché 4",            short: "M4" },
+  { slug: "roaming-truck", label: "Camion itinérant",    short: "RT" },
+  { slug: "unassigned",    label: "Sans QR (direct)",    short: "—"  },
+];
+
+export const SITE_SLUGS = SITES.map((s) => s.slug);
+
+export function isValidSite(slug: unknown): slug is SiteSlug {
+  return typeof slug === "string" && (SITE_SLUGS as string[]).includes(slug);
+}
+
+export function siteLabel(slug: SiteSlug): string {
+  return SITES.find((s) => s.slug === slug)?.label ?? slug;
+}

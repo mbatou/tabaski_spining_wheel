@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Topbar } from "@/components/Topbar";
 import { Footer } from "@/components/Footer";
 import { Wheel, computeTargetRotation } from "@/components/Wheel";
@@ -8,9 +9,11 @@ import { Modal } from "@/components/Modal";
 import { CapArt, LoseArt, PrizeArt, Sparkles } from "@/components/PrizeArt";
 import { PRIZE_LONG_LABEL, type PrizeKey } from "@/lib/prizes";
 import type { SpinResult } from "@/lib/spin";
+import { isValidSite, type SiteSlug } from "@/lib/sites";
 
 const MAX_PER_DAY = 2;
 const MAX_TOTAL = 8;
+const SITE_STORAGE_KEY = "wave_site";
 
 type ModalKind = "win" | "lose" | "cap" | null;
 
@@ -63,13 +66,42 @@ function Countdown() {
   );
 }
 
-export default function WheelPage() {
+export default function WheelPageWrapper() {
+  return (
+    <Suspense>
+      <WheelPage />
+    </Suspense>
+  );
+}
+
+function WheelPage() {
+  const params = useSearchParams();
   const [spinsToday, setSpinsToday] = useState(MAX_PER_DAY);
   const [spinsTotal, setSpinsTotal] = useState(MAX_TOTAL);
   const [rotation, setRotation] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [modal, setModal] = useState<ModalKind>(null);
   const [wonPrize, setWonPrize] = useState<PrizeKey | null>(null);
+  const [site, setSite] = useState<SiteSlug>("unassigned");
+
+  useEffect(() => {
+    const fromUrl = params.get("site");
+    if (isValidSite(fromUrl)) {
+      setSite(fromUrl);
+      try {
+        window.localStorage.setItem(SITE_STORAGE_KEY, fromUrl);
+      } catch {
+        /* localStorage may be unavailable (private browsing) — ignore */
+      }
+      return;
+    }
+    try {
+      const stored = window.localStorage.getItem(SITE_STORAGE_KEY);
+      if (isValidSite(stored)) setSite(stored);
+    } catch {
+      /* ignore */
+    }
+  }, [params]);
 
   const closeModal = useCallback(() => setModal(null), []);
 
@@ -84,7 +116,7 @@ export default function WheelPage() {
       const res = await fetch("/api/spin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spinsLeftToday: spinsToday, spinsLeftTotal: spinsTotal }),
+        body: JSON.stringify({ spinsLeftToday: spinsToday, spinsLeftTotal: spinsTotal, site }),
       });
       if (!res.ok) throw new Error(`spin failed: ${res.status}`);
       const result: SpinResult = await res.json();
@@ -110,7 +142,7 @@ export default function WheelPage() {
       console.error(err);
       setSpinning(false);
     }
-  }, [rotation, spinning, spinsToday, spinsTotal]);
+  }, [rotation, site, spinning, spinsToday, spinsTotal]);
 
   const onWinClose = useCallback(() => {
     closeModal();
