@@ -25,7 +25,7 @@ Mobile-first single-page experience reached by scanning a QR code: the user land
 - `/supervisor` — password-gated panel for the campaign chief & on-site supervisors
   - Global stock (Sacs / Tabliers / Éventails / Gourdes) — current/initial, progress bar, inline editor
   - Per-site rows with: wins on/off toggle, today’s + total spins/wins, GPS coordinates editor with "use my current location" button, configurable radius (default 100 m)
-  - 5 sites: Marché 1–4 + Camion itinérant (the truck is a placeholder pending its location-publishing flow)
+  - 5 sites: Rond-point Case Bi + Marché 2–4 + Camion itinérant (the truck is a placeholder pending its location-publishing flow; market names other than Case Bi are placeholders until ATL confirms)
 - `/conditions` — placeholder T&Cs (each section flagged `[Placeholder — ATL à remplir]`)
 - `/api/spin` — server-side weighted draw + atomic global-stock decrement + per-site tallies (in-process backing for now; Upstash Redis in chunk 2)
 - `/api/check-location` — non-mutating "am I at a site?" probe used by the wheel page to greet users with their site name

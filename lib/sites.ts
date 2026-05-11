@@ -9,7 +9,7 @@ export type SiteMeta = {
 };
 
 export const SITES: readonly SiteMeta[] = [
-  { slug: "market-1",      label: "Marché 1",            short: "M1" },
+  { slug: "market-1",      label: "Rond-point Case Bi",  short: "RCB" },
   { slug: "market-2",      label: "Marché 2",            short: "M2" },
   { slug: "market-3",      label: "Marché 3",            short: "M3" },
   { slug: "market-4",      label: "Marché 4",            short: "M4" },
