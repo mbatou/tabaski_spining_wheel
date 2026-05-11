@@ -1,21 +1,34 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 import { Topbar } from "@/components/Topbar";
 import { Footer } from "@/components/Footer";
 import { Wheel, computeTargetRotation } from "@/components/Wheel";
 import { Modal } from "@/components/Modal";
 import { CapArt, LoseArt, PrizeArt, Sparkles } from "@/components/PrizeArt";
+import {
+  ActivateLocationScreen,
+  LocationDeniedScreen,
+  OutOfRangeScreen,
+  SiteDisabledScreen,
+} from "@/components/LocationScreens";
 import { PRIZE_LONG_LABEL, type PrizeKey } from "@/lib/prizes";
-import type { SpinResult } from "@/lib/spin";
-import { isValidSite, type SiteSlug } from "@/lib/sites";
+import type { NearestSiteSuggestion, SpinResponse } from "@/lib/spin";
+import type { LocationCheck } from "@/app/api/check-location/route";
 
 const MAX_PER_DAY = 2;
 const MAX_TOTAL = 8;
-const SITE_STORAGE_KEY = "wave_site";
 
 type ModalKind = "win" | "lose" | "cap" | null;
+
+type Position = { lat: number; lng: number; accuracy: number };
+
+type GateState =
+  | { kind: "idle"; rejected: boolean; loading: boolean }
+  | { kind: "denied" }
+  | { kind: "ready"; coords: Position; site: { slug: string; label: string } | null }
+  | { kind: "out-of-range"; coords: Position; nearestSites: NearestSiteSuggestion[] }
+  | { kind: "site-disabled"; coords: Position; siteLabel: string };
 
 function chanceWord(left: number): string {
   if (left === 0) return "Tu as utilisé toutes tes chances aujourd’hui";
@@ -66,73 +79,132 @@ function Countdown() {
   );
 }
 
-export default function WheelPageWrapper() {
-  return (
-    <Suspense>
-      <WheelPage />
-    </Suspense>
-  );
+function requestPosition(): Promise<Position> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      reject(new Error("geolocation-unavailable"));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        resolve({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        }),
+      (err) => reject(err),
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 30_000 },
+    );
+  });
 }
 
-function WheelPage() {
-  const params = useSearchParams();
+export default function WheelPage() {
   const [spinsToday, setSpinsToday] = useState(MAX_PER_DAY);
   const [spinsTotal, setSpinsTotal] = useState(MAX_TOTAL);
   const [rotation, setRotation] = useState(0);
   const [spinning, setSpinning] = useState(false);
   const [modal, setModal] = useState<ModalKind>(null);
   const [wonPrize, setWonPrize] = useState<PrizeKey | null>(null);
-  const [site, setSite] = useState<SiteSlug>("unassigned");
+  const [gate, setGate] = useState<GateState>({ kind: "idle", rejected: false, loading: false });
 
-  useEffect(() => {
-    const fromUrl = params.get("site");
-    if (isValidSite(fromUrl)) {
-      setSite(fromUrl);
-      try {
-        window.localStorage.setItem(SITE_STORAGE_KEY, fromUrl);
-      } catch {
-        /* localStorage may be unavailable (private browsing) — ignore */
+  const onActivate = useCallback(async () => {
+    setGate({ kind: "idle", rejected: false, loading: true });
+    let pos: Position;
+    try {
+      pos = await requestPosition();
+    } catch (err) {
+      const code = (err as GeolocationPositionError)?.code;
+      if (code === 1) {
+        setGate({ kind: "denied" });
+      } else {
+        setGate({ kind: "idle", rejected: true, loading: false });
       }
       return;
     }
     try {
-      const stored = window.localStorage.getItem(SITE_STORAGE_KEY);
-      if (isValidSite(stored)) setSite(stored);
+      const res = await fetch("/api/check-location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy }),
+      });
+      const data = (await res.json()) as LocationCheck;
+      if (data.status === "ok") {
+        setGate({ kind: "ready", coords: pos, site: data.site });
+      } else if (data.status === "site-disabled") {
+        setGate({ kind: "site-disabled", coords: pos, siteLabel: data.siteLabel });
+      } else if (data.status === "out-of-range") {
+        setGate({ kind: "out-of-range", coords: pos, nearestSites: data.nearestSites });
+      } else {
+        setGate({ kind: "idle", rejected: true, loading: false });
+      }
     } catch {
-      /* ignore */
+      setGate({ kind: "idle", rejected: true, loading: false });
     }
-  }, [params]);
+  }, []);
 
   const closeModal = useCallback(() => setModal(null), []);
 
   const onSpin = useCallback(async () => {
     if (spinning) return;
+    if (gate.kind !== "ready") return;
     if (spinsToday <= 0) {
       setModal("cap");
       return;
     }
     setSpinning(true);
+
+    // Refresh position right before each spin so we catch users who moved off-site.
+    let pos: Position = gate.coords;
+    try {
+      pos = await requestPosition();
+    } catch {
+      /* fall back to last known position; server enforces */
+    }
+
     try {
       const res = await fetch("/api/spin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spinsLeftToday: spinsToday, spinsLeftTotal: spinsTotal, site }),
+        body: JSON.stringify({
+          lat: pos.lat,
+          lng: pos.lng,
+          accuracy: pos.accuracy,
+          spinsLeftToday: spinsToday,
+          spinsLeftTotal: spinsTotal,
+        }),
       });
-      if (!res.ok) throw new Error(`spin failed: ${res.status}`);
-      const result: SpinResult = await res.json();
+      const data = (await res.json()) as SpinResponse;
 
-      const target = computeTargetRotation(rotation, result.segmentIndex);
+      if (data.status === "out-of-range") {
+        setSpinning(false);
+        setGate({ kind: "out-of-range", coords: pos, nearestSites: data.nearestSites });
+        return;
+      }
+      if (data.status === "site-disabled") {
+        setSpinning(false);
+        setGate({ kind: "site-disabled", coords: pos, siteLabel: data.siteLabel });
+        return;
+      }
+      if (data.status === "no-location") {
+        setSpinning(false);
+        setGate({ kind: "idle", rejected: true, loading: false });
+        return;
+      }
+
+      const spin = data.spin;
+      const target = computeTargetRotation(rotation, spin.segmentIndex);
       setRotation(target);
+      setGate({ kind: "ready", coords: pos, site: spin.site });
 
       const prefersReduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const settle = prefersReduce ? 200 : 4400;
 
       window.setTimeout(() => {
-        setSpinsToday(result.spinsLeftToday);
-        setSpinsTotal(result.spinsLeftTotal);
+        setSpinsToday(spin.spinsLeftToday);
+        setSpinsTotal(spin.spinsLeftTotal);
         setSpinning(false);
-        if (result.outcome === "win") {
-          setWonPrize(result.prizeKey);
+        if (spin.outcome === "win") {
+          setWonPrize(spin.prizeKey);
           setModal("win");
         } else {
           setModal("lose");
@@ -142,7 +214,7 @@ function WheelPage() {
       console.error(err);
       setSpinning(false);
     }
-  }, [rotation, site, spinning, spinsToday, spinsTotal]);
+  }, [gate, rotation, spinning, spinsToday, spinsTotal]);
 
   const onWinClose = useCallback(() => {
     closeModal();
@@ -163,31 +235,65 @@ function WheelPage() {
     }
   }, [closeModal, onSpin, spinsToday]);
 
+  // ───── Render branches ─────
+  let body: React.ReactNode;
+  if (gate.kind === "idle") {
+    body = (
+      <ActivateLocationScreen
+        onActivate={onActivate}
+        loading={gate.loading}
+        rejected={gate.rejected}
+      />
+    );
+  } else if (gate.kind === "denied") {
+    body = (
+      <LocationDeniedScreen onRetry={() => setGate({ kind: "idle", rejected: false, loading: false })} />
+    );
+  } else if (gate.kind === "out-of-range") {
+    body = (
+      <OutOfRangeScreen
+        nearestSites={gate.nearestSites}
+        onRetry={() => setGate({ kind: "idle", rejected: false, loading: false })}
+      />
+    );
+  } else if (gate.kind === "site-disabled") {
+    body = (
+      <SiteDisabledScreen
+        siteLabel={gate.siteLabel}
+        onRetry={() => setGate({ kind: "idle", rejected: false, loading: false })}
+      />
+    );
+  } else {
+    body = (
+      <div className="wheel-stage">
+        <h2 className="wheel-title">
+          Appuie pour <span className="hilite">tourner</span>
+        </h2>
+        <p className="wheel-sub">
+          Bonne chance, ndaanaan&nbsp;!
+          {gate.site ? <><br /><span className="wheel-site-pill">{gate.site.label}</span></> : null}
+        </p>
+
+        <Wheel rotation={rotation} spinning={spinning} />
+
+        <div className="spin-cta-wrap">
+          <button className="btn btn--invert" onClick={onSpin} disabled={spinning}>
+            {spinning ? "Bonne chance…" : "Tourner la roue"}
+          </button>
+          <p className="spin-helper">{helperWord(spinsToday)}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <section className="screen-wheel">
         <Topbar spinsLeftToday={spinsToday} maxSpinsPerDay={MAX_PER_DAY} />
-
-        <div className="wheel-stage">
-          <h2 className="wheel-title">
-            Appuie pour <span className="hilite">tourner</span>
-          </h2>
-          <p className="wheel-sub">Bonne chance, ndaanaan&nbsp;!</p>
-
-          <Wheel rotation={rotation} spinning={spinning} />
-
-          <div className="spin-cta-wrap">
-            <button className="btn btn--invert" onClick={onSpin} disabled={spinning}>
-              {spinning ? "Bonne chance…" : "Tourner la roue"}
-            </button>
-            <p className="spin-helper">{helperWord(spinsToday)}</p>
-          </div>
-        </div>
-
+        {body}
         <Footer />
       </section>
 
-      {/* WIN MODAL */}
       <Modal open={modal === "win" && wonPrize !== null} onClose={onWinClose} ariaLabelledBy="win-title">
         <div className="modal-art" aria-hidden="true">
           <Sparkles />
@@ -214,7 +320,6 @@ function WheelPage() {
         </div>
       </Modal>
 
-      {/* LOSE MODAL */}
       <Modal open={modal === "lose"} onClose={onLoseClose} ariaLabelledBy="lose-title">
         <div className="modal-art" aria-hidden="true">
           <LoseArt />
@@ -232,7 +337,6 @@ function WheelPage() {
         </div>
       </Modal>
 
-      {/* DAILY-CAP MODAL */}
       <Modal open={modal === "cap"} onClose={closeModal} ariaLabelledBy="cap-title">
         <div className="modal-art" aria-hidden="true">
           <CapArt />

@@ -1,13 +1,28 @@
 import { PRIZES, type PrizeKey } from "./prizes";
+import type { SiteSlug } from "./sites";
 
-export type SpinOutcome =
-  | { outcome: "win"; prizeKey: Exclude<PrizeKey, "lose">; segmentIndex: number }
-  | { outcome: "lose"; prizeKey: "lose"; segmentIndex: number };
-
-export type SpinResult = SpinOutcome & {
+export type SpinPayload = {
+  outcome: "win" | "lose";
+  prizeKey: PrizeKey;
+  segmentIndex: number;
   spinsLeftToday: number;
   spinsLeftTotal: number;
+  site: { slug: SiteSlug; label: string };
 };
+
+export type NearestSiteSuggestion = {
+  slug: SiteSlug;
+  label: string;
+  lat: number;
+  lng: number;
+  distanceM: number;
+};
+
+export type SpinResponse =
+  | { status: "ok"; spin: SpinPayload }
+  | { status: "out-of-range"; nearestSites: NearestSiteSuggestion[] }
+  | { status: "site-disabled"; siteLabel: string }
+  | { status: "no-location" };
 
 export function pickPrizeIndex(weights: readonly number[], rand: () => number = Math.random): number {
   const total = weights.reduce((s, w) => s + w, 0);

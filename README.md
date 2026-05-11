@@ -14,17 +14,29 @@ Mobile-first single-page experience reached by scanning a QR code: the user land
 - **PostHog** (planned, chunk 5) for analytics
 - Deploy target: **Vercel**
 
-## What’s in this chunk (chunk 1)
+## What’s shipped so far
 
 - `/` — Wheel screen, mobile-first, identical brand tokens to the prototype
-  - Live Dakar date/time stamp in the topbar (anti-fraud signal, updates every 30 s)
+  - Live Dakar date/time stamp in the topbar
   - Wheel SVG with 5 × 72° segments, butter pegs, violet hub ring, dotted overlay on the violet segment
   - Spin animation respects `prefers-reduced-motion`
+  - **Geofenced**: the wheel only activates inside the radius of a configured site. Users out of range see the nearest active sites with directions; users who deny location permission see a clear retry screen.
 - 3 bottom-sheet modals (Win / Lose / Daily-cap) with grabber affordance and slide-up animation
+- `/supervisor` — password-gated panel for the campaign chief & on-site supervisors
+  - Global stock (Sacs / Tabliers / Éventails / Gourdes) — current/initial, progress bar, inline editor
+  - Per-site rows with: wins on/off toggle, today’s + total spins/wins, GPS coordinates editor with "use my current location" button, configurable radius (default 100 m)
+  - 5 sites: Marché 1–4 + Camion itinérant (the truck is a placeholder pending its location-publishing flow)
 - `/conditions` — placeholder T&Cs (each section flagged `[Placeholder — ATL à remplir]`)
-- `/api/spin` — **mocked** weighted-random outcome. Real implementation lands in chunk 2.
+- `/api/spin` — server-side weighted draw + atomic global-stock decrement + per-site tallies (in-process backing for now; Upstash Redis in chunk 2)
+- `/api/check-location` — non-mutating "am I at a site?" probe used by the wheel page to greet users with their site name
 
 The prototype’s floating dev-nav has been **stripped** as required.
+
+### Single QR + geolocation flow
+
+A single QR (`https://<your-domain>/`) is enough — geofencing routes the spin to the right site. The user must allow browser location; the server matches the lat/lng to the closest configured site within its radius. If they’re not in range, they see a list of the nearest active sites with "Open in Maps" links.
+
+Supervisors set each site’s GPS coordinates from the panel (one tap on "Utiliser ma position actuelle" while standing at the site) or by entering lat/lng manually. Until a site has coordinates, no user can match it.
 
 ## Coming in later chunks
 

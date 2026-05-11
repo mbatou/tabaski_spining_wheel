@@ -4,14 +4,13 @@
  * reset on every server restart / on Vercel cold starts.
  *
  * Chunk 2 swaps this module for an Upstash Redis–backed implementation that
- * exposes the same exported surface (read, toggleSite, adjustStock, recordSpin).
- *
- * Until then, this is fine for a single dev session and for clicking through
- * the supervisor panel UI to validate the flow with the campaign chief.
+ * exposes the same exported surface (snapshot, setSiteWinsEnabled, setStock,
+ * setSiteCoords, clearSiteCoords, recordSpin).
  */
 
-import { PRIZES, type PrizeKey } from "./prizes";
-import { SITES, type SiteSlug } from "./sites";
+import type { PrizeKey } from "./prizes";
+import { DEFAULT_SITE_RADIUS_M, SITES, type SiteSlug } from "./sites";
+import type { SiteCoords } from "./geo";
 
 const PRIZE_STOCK_DEFAULTS: Record<Exclude<PrizeKey, "lose">, number> = {
   sac: 1500,
@@ -36,11 +35,10 @@ function initialStock(): Record<Exclude<PrizeKey, "lose">, number> {
   };
 }
 
-function initialSites(): Record<SiteSlug, { winsEnabled: boolean }> {
-  return Object.fromEntries(SITES.map((s) => [s.slug, { winsEnabled: true }])) as Record<
-    SiteSlug,
-    { winsEnabled: boolean }
-  >;
+function initialSites(): Record<SiteSlug, { winsEnabled: boolean; coords: SiteCoords | null }> {
+  return Object.fromEntries(
+    SITES.map((s) => [s.slug, { winsEnabled: true, coords: null }]),
+  ) as Record<SiteSlug, { winsEnabled: boolean; coords: SiteCoords | null }>;
 }
 
 export type SpinTally = {
@@ -59,10 +57,8 @@ function emptyTally(): SpinTally {
 
 type StoreState = {
   stock: Record<Exclude<PrizeKey, "lose">, number>;
-  sites: Record<SiteSlug, { winsEnabled: boolean }>;
-  // tally key: `${siteSlug}:${yyyymmdd}`
-  daily: Map<string, SpinTally>;
-  // total tally per site over the whole campaign
+  sites: Record<SiteSlug, { winsEnabled: boolean; coords: SiteCoords | null }>;
+  daily: Map<string, SpinTally>; // key: `${siteSlug}:${yyyymmdd}`
   total: Map<SiteSlug, SpinTally>;
 };
 
@@ -81,20 +77,30 @@ function getStore(): StoreState {
 }
 
 export function dakarDateKey(now: Date = new Date()): string {
-  // YYYYMMDD in Africa/Dakar (UTC+0, no DST)
-  const fmt = new Intl.DateTimeFormat("en-CA", {
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Africa/Dakar",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  });
-  return fmt.format(now).replaceAll("-", "");
+  })
+    .format(now)
+    .replaceAll("-", "");
 }
+
+export type SiteSnapshot = {
+  slug: SiteSlug;
+  label: string;
+  pending: boolean;
+  winsEnabled: boolean;
+  coords: SiteCoords | null;
+  today: SpinTally;
+  total: SpinTally;
+};
 
 export type StoreSnapshot = {
   stock: Record<Exclude<PrizeKey, "lose">, number>;
   initialStock: Record<Exclude<PrizeKey, "lose">, number>;
-  sites: { slug: SiteSlug; label: string; winsEnabled: boolean; today: SpinTally; total: SpinTally }[];
+  sites: SiteSnapshot[];
   totals: { attempts: number; wins: number; losses: number };
   dakarDate: string;
 };
@@ -102,13 +108,15 @@ export type StoreSnapshot = {
 export function snapshot(): StoreSnapshot {
   const s = getStore();
   const today = dakarDateKey();
-  const sitesView = SITES.map((site) => {
+  const sitesView: SiteSnapshot[] = SITES.map((site) => {
     const tally = s.daily.get(`${site.slug}:${today}`) ?? emptyTally();
     const total = s.total.get(site.slug) ?? emptyTally();
     return {
       slug: site.slug,
       label: site.label,
+      pending: site.pending === true,
       winsEnabled: s.sites[site.slug].winsEnabled,
+      coords: s.sites[site.slug].coords,
       today: tally,
       total,
     };
@@ -138,17 +146,23 @@ export function setSiteWinsEnabled(slug: SiteSlug, enabled: boolean): void {
   s.sites[slug].winsEnabled = enabled;
 }
 
+export function setSiteCoords(slug: SiteSlug, lat: number, lng: number, radiusM = DEFAULT_SITE_RADIUS_M): void {
+  const s = getStore();
+  if (!s.sites[slug]) return;
+  s.sites[slug].coords = { lat, lng, radiusM, updatedAt: Date.now() };
+}
+
+export function clearSiteCoords(slug: SiteSlug): void {
+  const s = getStore();
+  if (!s.sites[slug]) return;
+  s.sites[slug].coords = null;
+}
+
 export function setStock(prize: Exclude<PrizeKey, "lose">, value: number): void {
   const s = getStore();
   s.stock[prize] = Math.max(0, Math.floor(value));
 }
 
-/**
- * Atomically resolve a spin. Returns the outcome to surface to the user.
- * Honours per-site wins-enabled flag and global stock.
- *
- * Precondition: `pickPrizeIndex` already chose `intendedPrize` from weights.
- */
 export function recordSpin(args: {
   site: SiteSlug;
   intendedPrize: PrizeKey;
@@ -193,6 +207,3 @@ export function recordSpin(args: {
   s.total.set(args.site, totalTally);
   return { resolved, reason };
 }
-
-// Re-export for tests
-export const _internal = { getStore, emptyTally, PRIZES };
