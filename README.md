@@ -52,13 +52,6 @@ npm run build       # production build
 npm run start       # serve production build
 ```
 
-### Asset placeholders
-
-Until the official PNGs are dropped in, the wheel hub and wordmark use SVG approximations (`public/penguin.svg`, `public/payez-avec-wave.svg`). To swap in the real artwork:
-
-1. Save the official files to `public/penguin.png` and `public/payez-avec-wave.png`.
-2. Update the two `<img src>` references — search the repo for `/penguin.svg` and `/payez-avec-wave.svg` and switch to `.png`.
-
 ## Environment variables
 
 All tunables (caps, weights, stock, campaign dates, Redis/PostHog credentials) live in `.env.example`. Copy to `.env.local` for development; configure the same keys as Vercel project envs for production.
@@ -105,8 +98,8 @@ lib/
   prizes.ts             # prize + segment definitions (shared SSR/client)
   spin.ts               # outcome logic (testable)
 public/
-  penguin.svg           # placeholder — swap for /penguin.png
-  payez-avec-wave.svg   # placeholder — swap for /payez-avec-wave.png
+  penguin.png           # wheel hub artwork
+  payez-avec-wave.png   # wordmark used in topbar + footer
 reference/
   Tabaski_Wheel.html    # original design prototype (source of truth)
 ```

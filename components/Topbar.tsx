@@ -37,9 +37,8 @@ export function Topbar({ spinsLeftToday, maxSpinsPerDay }: TopbarProps) {
   return (
     <header className="topbar">
       <span aria-label="Payez avec Wave" style={{ display: "inline-flex", alignItems: "center" }}>
-        {/* TODO: swap to "/payez-avec-wave.png" when the official PNG is dropped into public/ */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/payez-avec-wave.svg" alt="Payez avec Wave" width={110} height={36} />
+        <img src="/payez-avec-wave.png" alt="Payez avec Wave" width={110} height={36} />
       </span>
       <span className="chip" aria-live="polite" suppressHydrationWarning>
         <span suppressHydrationWarning>{stamp || "Aujourd’hui"}</span>

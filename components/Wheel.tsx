@@ -146,9 +146,8 @@ export function Wheel({ rotation, spinning, durationSec = 4.2 }: WheelProps) {
       </motion.div>
 
       <div className="hub" aria-hidden="true">
-        {/* TODO: swap src to "/penguin.png" once the official PNG is dropped in public/ */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/penguin.svg" alt="" />
+        <img src="/penguin.png" alt="" />
       </div>
 
       <div className="pointer" aria-hidden="true">
