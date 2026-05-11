@@ -1,6 +1,6 @@
 # Wave · Tabaski ndaanaan 2026 — Spinning Wheel
 
-Production build of the Wave Tabaski 2026 spin-to-win campaign (live **10 May → 25 May 2026**, Africa/Dakar).
+Production build of the Wave Tabaski 2026 spin-to-win campaign (live **11 May → 25 May 2026**, Africa/Dakar).
 Mobile-first single-page experience reached by scanning a QR code: the user lands directly on the wheel, gets up to 2 spins/day (8 total), and wins one of four Tabaski gifts (Sac shopping, Tablier, Éventail, Gourde) or a “try again tomorrow” outcome.
 
 > This branch ships **chunk 1** of the build (visual scaffold + mocked spin API). Inventory persistence, rate-limiting, anti-abuse and supervisor redemption land in subsequent chunks.
@@ -65,7 +65,7 @@ Notable defaults:
 | `SPIN_WEIGHTS` | `25,10,10,5,50` | Base probabilities `sac, tablier, eventail, gourde, lose` — wired in chunk 2 |
 | `PRIZE_STOCK_*` | `1500 / 600 / 600 / 500` | Total inventory for the 16-day campaign |
 | `PRIZE_DAILY_CAP_*` | `100 / 40 / 40 / 35` | Soft caps so stock doesn’t deplete in the first 3 days; tune from real day-1 data |
-| `CAMPAIGN_START` / `CAMPAIGN_END` | `2026-05-10` / `2026-05-25` | Africa/Dakar |
+| `CAMPAIGN_START` / `CAMPAIGN_END` | `2026-05-11` / `2026-05-25` | Africa/Dakar |
 
 ## Deploy to Vercel
 

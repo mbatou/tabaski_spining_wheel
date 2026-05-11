@@ -13,7 +13,7 @@ export default function ConditionsPage() {
         </Link>
         <h1>Conditions générales — Tabaski ndaanaan 2026</h1>
         <p>
-          Campagne du 10 mai 2026 au 25 mai 2026. Sponsor&nbsp;: Wave Mobile Money.
+          Campagne du 11 mai 2026 au 25 mai 2026. Sponsor&nbsp;: Wave Mobile Money.
         </p>
 
         {/* TODO ATL: replace the placeholder sections below with the final, legally-approved T&Cs supplied in the project drive. */}
