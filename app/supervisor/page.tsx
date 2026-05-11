@@ -15,7 +15,8 @@ export default function SupervisorPage({
   searchParams: { error?: string };
 }) {
   if (!isAuthenticated()) {
-    return <LoginForm error={searchParams.error === "1"} />;
+    const passwordConfigured = Boolean(process.env.SUPERVISOR_PASSWORD);
+    return <LoginForm error={searchParams.error === "1"} passwordConfigured={passwordConfigured} />;
   }
   const initial = snapshot();
   return <SupervisorPanel initial={initial} />;
