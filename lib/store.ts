@@ -53,6 +53,12 @@ function initialSites(): Record<SiteSlug, { winsEnabled: boolean; coords: SiteCo
       radiusM: DEFAULT_SITE_RADIUS_M,
       updatedAt: seededAt,
     },
+    "market-3": {
+      lat: 14.756742,
+      lng: -17.396727,
+      radiusM: DEFAULT_SITE_RADIUS_M,
+      updatedAt: seededAt,
+    },
   };
   return Object.fromEntries(
     SITES.map((s) => [s.slug, { winsEnabled: true, coords: seeds[s.slug] ?? null }]),
