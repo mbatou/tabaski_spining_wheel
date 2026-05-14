@@ -60,8 +60,8 @@ function initialSites(): Record<SiteSlug, { winsEnabled: boolean; coords: SiteCo
       updatedAt: seededAt,
     },
     "market-4": {
-      lat: 14.720433,
-      lng: -17.281981,
+      lat: 14.730488,
+      lng: -17.462093,
       radiusM: DEFAULT_SITE_RADIUS_M,
       updatedAt: seededAt,
     },
