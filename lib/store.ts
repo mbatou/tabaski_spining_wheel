@@ -9,8 +9,10 @@
  */
 
 import type { PrizeKey } from "./prizes";
+import { PRIZES } from "./prizes";
 import { DEFAULT_SITE_RADIUS_M, SITES, type SiteSlug } from "./sites";
 import type { SiteCoords } from "./geo";
+import { parseWeights, pickPrizeIndex } from "./spin";
 
 const PRIZE_STOCK_DEFAULTS: Record<Exclude<PrizeKey, "lose">, number> = {
   sac: 1500,
@@ -421,4 +423,142 @@ export function reportSnapshot(): CampaignReport {
     sites,
     daily,
   };
+}
+
+// ─────────────────────────── Demo data seeding ───────────────────────────
+
+/**
+ * Deterministic PRNG (mulberry32). Same seed → same numbers → consistent
+ * demo data across reloads, which matters when ATL presents the report.
+ */
+function makeRng(seed: number): () => number {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export type SeedResult = {
+  spinsGenerated: number;
+  daysCovered: number;
+  campaignStart: string;
+  campaignEnd: string;
+};
+
+/**
+ * Wipe the in-process store and replace it with a realistic distribution of
+ * spins across the campaign window. The shape mimics what we'd expect on the
+ * ground: light first few days while word spreads, a peak around Tabaski day,
+ * a slow wind-down after. Per-site share is weighted toward the busier
+ * downtown sites (Case Bi, HLM) with Pikine and Rufisque a bit smaller.
+ *
+ * Deterministic for a given (start, end) so re-running the seed yields the
+ * same numbers — important for repeat presentations.
+ */
+export function seedDemoData(args?: { start?: string; end?: string }): SeedResult {
+  const s = getStore();
+  const start = args?.start ?? parseEnvDate("CAMPAIGN_START", CAMPAIGN_START_DEFAULT);
+  const end = args?.end ?? parseEnvDate("CAMPAIGN_END", CAMPAIGN_END_DEFAULT);
+
+  // Reset everything we touch
+  s.daily.clear();
+  s.total.clear();
+  s.stock = initialStock();
+
+  const weights = parseWeights(process.env.SPIN_WEIGHTS);
+
+  // Per-day relative weight — slow ramp, peak ~ days 8–11, then wind-down
+  const dayCurve = [
+    0.30, 0.45, 0.60, 0.80,
+    0.95, 1.10, 1.20, 1.35,
+    1.45, 1.50, 1.40, 1.20,
+    1.00, 0.80, 0.55,
+  ];
+  // Per-site share (must sum ≈ 1.0; pending sites get 0)
+  const siteShare: Record<SiteSlug, number> = {
+    "market-1": 0.34, // Rond-point Case Bi — busiest
+    "market-2": 0.26, // Marché HLM
+    "market-3": 0.24, // Marché Pikine
+    "market-4": 0.16, // Marché Djouti Ba Rufisque
+    "roaming-truck": 0,
+  };
+
+  // Target total ~ 4 800 spins across the campaign — leaves comfortable headroom
+  // on the 3 200-piece prize stock with the 50% lose weight.
+  const targetTotal = 4_800;
+  const days = [...iterateDakarDays(start, end)];
+  const curveSum = dayCurve.slice(0, days.length).reduce((a, b) => a + b, 0);
+  const scale = curveSum === 0 ? 0 : targetTotal / curveSum;
+
+  // Seed the PRNG with a hash of the date range so the numbers are stable.
+  const seedSeed = (start + end).split("").reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), 0x811c9dc5);
+  const rand = makeRng(seedSeed);
+
+  let totalSpins = 0;
+  days.forEach((iso, idx) => {
+    const dayKey = isoToDateKey(iso);
+    const dayTotal = Math.round((dayCurve[idx] ?? 0.5) * scale);
+
+    for (const site of SITES) {
+      if (site.pending) continue;
+      const share = siteShare[site.slug] ?? 0;
+      if (share === 0) continue;
+      // Add some daily jitter ±15 % so sites don't move in perfect lockstep
+      const jitter = 1 + (rand() - 0.5) * 0.3;
+      const siteSpins = Math.max(0, Math.round(dayTotal * share * jitter));
+
+      const tally = emptyTally();
+      const total = s.total.get(site.slug) ?? emptyTally();
+
+      for (let i = 0; i < siteSpins; i++) {
+        const intendedIdx = pickPrizeIndex(weights, rand);
+        const intended = PRIZES[intendedIdx];
+
+        tally.attempts += 1;
+        total.attempts += 1;
+
+        if (intended.key === "lose") {
+          tally.losses += 1;
+          total.losses += 1;
+        } else {
+          const remaining = s.stock[intended.key];
+          if (remaining <= 0) {
+            tally.losses += 1;
+            total.losses += 1;
+          } else {
+            s.stock[intended.key] = remaining - 1;
+            tally.wins[intended.key] += 1;
+            total.wins[intended.key] += 1;
+          }
+        }
+        totalSpins += 1;
+      }
+
+      s.daily.set(`${site.slug}:${dayKey}`, tally);
+      s.total.set(site.slug, total);
+    }
+  });
+
+  return {
+    spinsGenerated: totalSpins,
+    daysCovered: days.length,
+    campaignStart: start,
+    campaignEnd: end,
+  };
+}
+
+/**
+ * Reset the in-process store to its initial empty state. Used to clear demo
+ * data before resuming real activity.
+ */
+export function resetStore(): void {
+  const s = getStore();
+  s.daily.clear();
+  s.total.clear();
+  s.stock = initialStock();
+  // Site coords + winsEnabled are deliberately preserved — those are
+  // configuration, not campaign data.
 }

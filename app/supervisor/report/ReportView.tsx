@@ -66,6 +66,7 @@ function downloadCsv(name: string, rows: (string | number)[][]): void {
 
 export function ReportView({ initial }: { initial: CampaignReport }) {
   const [report, setReport] = useState<CampaignReport>(initial);
+  const [busy, setBusy] = useState<null | "seeding" | "resetting">(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -75,6 +76,37 @@ export function ReportView({ initial }: { initial: CampaignReport }) {
       /* ignore */
     }
   }, []);
+
+  const seedDemo = useCallback(async () => {
+    const ok = window.confirm(
+      "Ceci REMPLACERA toutes les données actuelles par un jeu de démonstration " +
+        "couvrant la période de la campagne (11 — 25 mai 2026). À utiliser uniquement " +
+        "pour les présentations ATL.\n\nContinuer ?",
+    );
+    if (!ok) return;
+    setBusy("seeding");
+    try {
+      await fetch("/api/admin/seed-demo", { method: "POST" });
+      await refresh();
+    } finally {
+      setBusy(null);
+    }
+  }, [refresh]);
+
+  const resetData = useCallback(async () => {
+    const ok = window.confirm(
+      "Ceci EFFACERA toutes les données (réelles ou de démonstration). " +
+        "Les coordonnées GPS et l'état activé/désactivé des sites sont préservés.\n\nContinuer ?",
+    );
+    if (!ok) return;
+    setBusy("resetting");
+    try {
+      await fetch("/api/admin/seed-demo", { method: "DELETE" });
+      await refresh();
+    } finally {
+      setBusy(null);
+    }
+  }, [refresh]);
 
   useEffect(() => {
     // Refresh once on mount to ensure we render the freshest data even if the
@@ -188,6 +220,36 @@ export function ReportView({ initial }: { initial: CampaignReport }) {
           </button>
         </nav>
       </header>
+
+      <div className="rpt-demo-bar">
+        <div className="rpt-demo-text">
+          <strong>Données de démonstration</strong>
+          <span>
+            Pour les présentations ATL — génère un jeu de données rétroactif et déterministe sur la période {report.campaignStart} → {report.campaignEnd}.
+            {!report.persistent
+              ? " À ré-exécuter après chaque cold start serveur tant que Redis n'est pas branché."
+              : ""}
+          </span>
+        </div>
+        <div className="rpt-demo-actions">
+          <button
+            type="button"
+            className="btn btn--primary rpt-export"
+            onClick={seedDemo}
+            disabled={busy !== null}
+          >
+            {busy === "seeding" ? "Génération…" : "Charger données de démo"}
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost-ink rpt-export"
+            onClick={resetData}
+            disabled={busy !== null}
+          >
+            {busy === "resetting" ? "Effacement…" : "Effacer les données"}
+          </button>
+        </div>
+      </div>
 
       <section className="rpt-section">
         <h2>Résumé exécutif</h2>
