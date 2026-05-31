@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
+import Link from "next/link";
 import type { StoreSnapshot } from "@/lib/store";
 import type { SiteSlug } from "@/lib/sites";
 import { DEFAULT_SITE_RADIUS_M } from "@/lib/sites";
@@ -174,9 +175,14 @@ export function SupervisorPanel({ initial }: { initial: StoreSnapshot }) {
           <p className="sup-eyebrow">Wave · Tabaski 2026</p>
           <h1>Supervision de la campagne</h1>
         </div>
-        <form method="POST" action="/supervisor/logout">
-          <button className="btn btn--ghost-ink" type="submit">Déconnexion</button>
-        </form>
+        <div className="sup-header-actions">
+          <Link href="/supervisor/report" className="btn btn--primary sup-report-link">
+            Rapport campagne
+          </Link>
+          <form method="POST" action="/supervisor/logout">
+            <button className="btn btn--ghost-ink" type="submit">Déconnexion</button>
+          </form>
+        </div>
       </header>
 
       <section className="sup-section">

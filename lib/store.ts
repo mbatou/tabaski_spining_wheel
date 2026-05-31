@@ -237,3 +237,188 @@ export function recordSpin(args: {
   s.total.set(args.site, totalTally);
   return { resolved, reason };
 }
+
+// ─────────────────────────── Campaign report ───────────────────────────
+
+const CAMPAIGN_START_DEFAULT = "2026-05-11";
+const CAMPAIGN_END_DEFAULT = "2026-05-25";
+
+function parseEnvDate(name: string, fallback: string): string {
+  const v = process.env[name];
+  if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return fallback;
+  return v;
+}
+
+function isoToDateKey(iso: string): string {
+  return iso.replaceAll("-", "");
+}
+
+function dateKeyToIso(key: string): string {
+  return `${key.slice(0, 4)}-${key.slice(4, 6)}-${key.slice(6, 8)}`;
+}
+
+function* iterateDakarDays(startIso: string, endIso: string): Generator<string> {
+  const [sy, sm, sd] = startIso.split("-").map(Number);
+  const [ey, em, ed] = endIso.split("-").map(Number);
+  // Use UTC math to avoid the local-TZ offset bug — Africa/Dakar is UTC+0,
+  // so calendar days line up exactly with UTC days.
+  let cur = Date.UTC(sy, sm - 1, sd);
+  const end = Date.UTC(ey, em - 1, ed);
+  while (cur <= end) {
+    const d = new Date(cur);
+    const iso = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    yield iso;
+    cur += 86_400_000;
+  }
+}
+
+export type DailyBreakdown = {
+  date: string; // ISO yyyy-mm-dd
+  totals: { attempts: number; wins: number; losses: number };
+  prizes: Record<Exclude<PrizeKey, "lose">, number>;
+  siteBreakdown: { slug: SiteSlug; label: string; attempts: number; wins: number; losses: number }[];
+};
+
+export type SiteReportRow = {
+  slug: SiteSlug;
+  label: string;
+  pending: boolean;
+  winsEnabled: boolean;
+  attempts: number;
+  wins: number;
+  losses: number;
+  prizes: Record<Exclude<PrizeKey, "lose">, number>;
+  winRate: number;
+};
+
+export type CampaignReport = {
+  generatedAt: number;
+  campaignStart: string;
+  campaignEnd: string;
+  status: "live" | "ended" | "not-started";
+  persistent: boolean;
+  summary: {
+    totalAttempts: number;
+    totalWins: number;
+    totalLosses: number;
+    winRate: number;
+    activeDays: number;
+    siteCount: number;
+  };
+  stock: Record<
+    Exclude<PrizeKey, "lose">,
+    { initial: number; remaining: number; distributed: number; pct: number }
+  >;
+  sites: SiteReportRow[];
+  daily: DailyBreakdown[];
+};
+
+export function reportSnapshot(): CampaignReport {
+  const s = getStore();
+  const start = parseEnvDate("CAMPAIGN_START", CAMPAIGN_START_DEFAULT);
+  const end = parseEnvDate("CAMPAIGN_END", CAMPAIGN_END_DEFAULT);
+  const todayIso = dateKeyToIso(dakarDateKey());
+
+  const status: "live" | "ended" | "not-started" =
+    todayIso < start ? "not-started" : todayIso > end ? "ended" : "live";
+
+  const stockNow = { ...s.stock };
+  const stockInit = initialStock();
+  const stock = (Object.keys(stockInit) as Exclude<PrizeKey, "lose">[]).reduce(
+    (acc, k) => {
+      const initial = stockInit[k];
+      const remaining = stockNow[k];
+      const distributed = Math.max(0, initial - remaining);
+      acc[k] = { initial, remaining, distributed, pct: initial === 0 ? 0 : distributed / initial };
+      return acc;
+    },
+    {} as CampaignReport["stock"],
+  );
+
+  // Iterate every day of the campaign so the timeline includes zero-activity days.
+  // Cap the upper bound at min(today, campaignEnd). Site rows are derived from
+  // these per-day tallies so summary, sites and daily always reconcile.
+  const upper = todayIso < end ? todayIso : end;
+  const dailyDates = todayIso < start ? [] : [...iterateDakarDays(start, upper)];
+
+  const sitesAcc: Record<SiteSlug, SpinTally> = Object.fromEntries(
+    SITES.map((s) => [s.slug, emptyTally()]),
+  ) as Record<SiteSlug, SpinTally>;
+
+  const daily: DailyBreakdown[] = dailyDates.map((iso) => {
+    const key = isoToDateKey(iso);
+    const dayTotals = { attempts: 0, wins: 0, losses: 0 };
+    const dayPrizes = { sac: 0, tablier: 0, eventail: 0, gourde: 0 } as Record<
+      Exclude<PrizeKey, "lose">,
+      number
+    >;
+    const siteRows: DailyBreakdown["siteBreakdown"] = [];
+    for (const site of SITES) {
+      const tally = s.daily.get(`${site.slug}:${key}`) ?? emptyTally();
+      const wins = tally.wins.sac + tally.wins.tablier + tally.wins.eventail + tally.wins.gourde;
+      dayTotals.attempts += tally.attempts;
+      dayTotals.wins += wins;
+      dayTotals.losses += tally.losses;
+      dayPrizes.sac += tally.wins.sac;
+      dayPrizes.tablier += tally.wins.tablier;
+      dayPrizes.eventail += tally.wins.eventail;
+      dayPrizes.gourde += tally.wins.gourde;
+      siteRows.push({
+        slug: site.slug,
+        label: site.label,
+        attempts: tally.attempts,
+        wins,
+        losses: tally.losses,
+      });
+      // Roll the site accumulator forward.
+      const acc = sitesAcc[site.slug];
+      acc.attempts += tally.attempts;
+      acc.losses += tally.losses;
+      acc.wins.sac += tally.wins.sac;
+      acc.wins.tablier += tally.wins.tablier;
+      acc.wins.eventail += tally.wins.eventail;
+      acc.wins.gourde += tally.wins.gourde;
+    }
+    return { date: iso, totals: dayTotals, prizes: dayPrizes, siteBreakdown: siteRows };
+  });
+
+  const sites: SiteReportRow[] = SITES.map((site) => {
+    const t = sitesAcc[site.slug];
+    const winsTotal = t.wins.sac + t.wins.tablier + t.wins.eventail + t.wins.gourde;
+    return {
+      slug: site.slug,
+      label: site.label,
+      pending: site.pending === true,
+      winsEnabled: s.sites[site.slug].winsEnabled,
+      attempts: t.attempts,
+      wins: winsTotal,
+      losses: t.losses,
+      prizes: { ...t.wins },
+      winRate: t.attempts === 0 ? 0 : winsTotal / t.attempts,
+    };
+  });
+
+  const totalAttempts = sites.reduce((a, x) => a + x.attempts, 0);
+  const totalWins = sites.reduce((a, x) => a + x.wins, 0);
+  const totalLosses = sites.reduce((a, x) => a + x.losses, 0);
+  const activeDays = daily.filter((d) => d.totals.attempts > 0).length;
+
+  return {
+    generatedAt: Date.now(),
+    campaignStart: start,
+    campaignEnd: end,
+    status,
+    persistent: Boolean(process.env.UPSTASH_REDIS_REST_URL),
+    summary: {
+      totalAttempts,
+      totalWins,
+      totalLosses,
+      winRate: totalAttempts === 0 ? 0 : totalWins / totalAttempts,
+      activeDays,
+      siteCount: sites.filter((s) => !s.pending).length,
+    },
+    stock,
+    sites,
+    daily,
+  };
+}
